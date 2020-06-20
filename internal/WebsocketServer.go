@@ -32,6 +32,8 @@ type LorcClient struct {
 	send chan []byte `json:"-"`
 	//LORC Server that controls this client
 	master TaskMaster `json:"-"`
+	//is client running a job
+	executingTask bool
 }
 
 var upgrader = websocket.Upgrader{
@@ -60,17 +62,37 @@ func (c *LorcClient) parseMessage(jsonMessage []byte) {
 			c.send <- jsonData
 			break
 		case ClientCapabilitiesMessage:
-			capabilitiesMessage := NewLorcCapabilitiesMessage()
+			var capabilitiesMessage LorcCapabilitiesMessage
 			if err := json.Unmarshal(bytes.Trim(jsonMessage, "\x00"), &capabilitiesMessage); err != nil {
 				log.Printf("Could not unmarshal LorcMessage, error: %s \n", err)
 				return
 			} else {
 				for capability, exists := range capabilitiesMessage.RequestedCapabilities {
 					fmt.Println("Capability:", capability, "Exists:", exists)
-
 				}
 			}
 			break
+		case JobResultMessage:
+			var jobResultMessage LorcJobResultMessage
+			if err := json.Unmarshal(bytes.Trim(jsonMessage, "\x00"), &jobResultMessage); err != nil {
+				log.Printf("Could not unmarshal LorcMessage, error: %s \n", err)
+				return
+			} else {
+				fmt.Printf("%s\n", string(jobResultMessage.Output))
+				job := c.master.jobs[jobResultMessage.JobId]
+				job.UpdateResult(string(jobResultMessage.Output))
+				c.master.jobs[jobResultMessage.JobId] = job
+			}
+		case JobDoneMessage:
+			var jobResultMessage LorcJobDoneMessage
+			if err := json.Unmarshal(bytes.Trim(jsonMessage, "\x00"), &jobResultMessage); err != nil {
+				log.Printf("Could not unmarshal LorcMessage, error: %s \n", err)
+				return
+			} else {
+				//delete(c.master.jobs,jobResultMessage.JobId)
+			}
+		default:
+			fmt.Println("Unkown message type")
 		}
 	}
 }
@@ -134,14 +156,15 @@ func (c *LorcClient) readPump() {
 			}
 			break
 		}
-
-		newLorcMessage := NewLorcMessage()
-		if err := json.Unmarshal(bytes.Trim(msg, "\x00"), &newLorcMessage); err != nil {
-			log.Printf("Could not unmarshal LorcMessage, error: %s \n", err)
-		} else {
-			fmt.Println(newLorcMessage)
-		}
 		c.parseMessage(msg)
 
+	}
+}
+
+func (c *LorcClient) sendJob(job Job) {
+	newJobMessage := NewLorcNewJobMessage(job)
+	if newJobMessage != nil {
+		jsonMessage, _ := json.Marshal(newJobMessage)
+		c.send <- jsonMessage
 	}
 }

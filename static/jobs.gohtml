@@ -1,0 +1,44 @@
+{{define "form"}}
+    Enter your job to run below:<br>
+
+    <form enctype="multipart/form-data" action="/jobs" method="post">
+
+        <input name="command" type="text">
+        <input name="file" type="file">
+        <input type="submit">
+
+    </form>
+{{end}}
+
+
+<!DOCTYPE html>
+<html lang="en" style="background-color: darkblue">
+<head>
+    <meta charset="UTF-8">
+    <title>Jobs</title>
+</head>
+<body style="color: white">
+<div>
+    Jobs: <br>
+    {{if .}}
+        <ul>
+            {{ range $key, $value := . }}
+                <li><a href="/jobs/{{$key}}">{{$key}}</a></li>
+            {{end}}
+        </ul>
+    {{else}}
+        No jobs.
+    {{end}}
+    <br>
+    Enter your job to run below:<br>
+
+    <form enctype="multipart/form-data" action="/jobs" method="post">
+
+        <input name="command" type="text">
+        <input name="file" type="file">
+        <input type="submit">
+
+    </form>
+</div>
+</body>
+</html>

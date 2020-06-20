@@ -1,0 +1,18 @@
+<html>
+
+<h1>Workflows</h1>
+
+
+{{if .}}
+    <ul>
+        {{ range $key, $value := . }}
+            <li><a href="/workflows/{{$key}}">{{$key}}</a></li>
+        {{end}}
+    </ul>
+{{else}}
+    No Workflows.
+{{end}}
+<br>
+<a href="/workflows/new">New Workflow</a>
+
+</html>

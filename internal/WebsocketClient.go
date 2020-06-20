@@ -1,15 +1,19 @@
 package internal
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/websocket"
+	"io"
+	"io/ioutil"
 	"log"
 	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 )
 
 type WebSocketClient struct {
@@ -39,9 +43,102 @@ func (ws *WebSocketClient) parseLorcServerMessage(jsonMessage []byte) {
 					}
 				}
 				jsonData, _ := json.Marshal(capabilitiesMessage)
-
 				ws.conn.WriteMessage(websocket.TextMessage, jsonData)
 			}
+		case NewJobMessage:
+			var newJobMessage LorcNewJobMessage
+			if err := json.Unmarshal(bytes.Trim(jsonMessage, "\x00"), &newJobMessage); err != nil {
+				log.Printf("Could not unmarshal LorcMessage, error: %s \n", err)
+				return
+			} else {
+				fmt.Println(newJobMessage.Job)
+				go func() {
+					if strings.Contains(newJobMessage.Job.Command, "|") {
+						commandSlice := strings.Split(newJobMessage.Job.Command, "|")
+						var commands []exec.Cmd
+						for _, command := range commandSlice {
+							cmdArgs := strings.Fields(strings.TrimSpace(command))
+							_, err := exec.LookPath(cmdArgs[0])
+							if err != nil {
+								break
+							}
+							dir, _ := os.Getwd()
+							for _, inputFile := range newJobMessage.Job.Files {
+								fmt.Println("writing file to : " + dir + string(os.PathSeparator) + inputFile.FileName)
+								err = ioutil.WriteFile(dir+string(os.PathSeparator)+inputFile.FileName, inputFile.FileContents, 0644)
+								if err != nil {
+									fmt.Println(err)
+								}
+								commands = append(commands, *exec.Command(cmdArgs[0], cmdArgs[1:]...))
+							}
+							if len(commandSlice) == len(commands) {
+								finalOut, _ := commands[1].StdoutPipe()
+								buf := bufio.NewReader(finalOut)
+
+								r, w := io.Pipe()
+								commands[0].Stdout = w
+								commands[1].Stdin = r
+								commands[0].Start()
+								commands[1].Start()
+								commands[0].Wait()
+								w.Close()
+
+								for {
+									line, _, _ := buf.ReadLine()
+									if line == nil {
+										break
+									}
+									jobResult := NewLorcJobResultMessage(newJobMessage.Job.JobId, line)
+									jsonResultMessage, _ := json.Marshal(jobResult)
+									fmt.Println(string(line))
+									fmt.Println(string(jsonResultMessage))
+									ws.conn.WriteMessage(websocket.TextMessage, jsonResultMessage)
+								}
+								commands[1].Wait()
+
+								jobResult := NewLorcJobDoneMessage(newJobMessage.Job.JobId)
+								jsonResultMessage, _ := json.Marshal(jobResult)
+								ws.conn.WriteMessage(websocket.TextMessage, jsonResultMessage)
+							}
+						}
+					} else {
+						cmdArgs := strings.Fields(newJobMessage.Job.Command)
+						_, err := exec.LookPath(cmdArgs[0])
+						if err == nil {
+							dir, _ := os.Getwd()
+							for _, inputFile := range newJobMessage.Job.Files {
+								fmt.Println("writing file to : " + dir + string(os.PathSeparator) + inputFile.FileName)
+								err = ioutil.WriteFile(dir+string(os.PathSeparator)+inputFile.FileName, inputFile.FileContents, 0644)
+								if err != nil {
+									fmt.Println(err)
+								}
+							}
+							cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+							stdout, _ := cmd.StdoutPipe()
+							cmd.Start()
+							buf := bufio.NewReader(stdout)
+							for {
+								line, _, _ := buf.ReadLine()
+								if line == nil {
+									break
+								}
+								jobResult := NewLorcJobResultMessage(newJobMessage.Job.JobId, line)
+								jsonResultMessage, _ := json.Marshal(jobResult)
+								fmt.Println(string(line))
+								fmt.Println(string(jsonResultMessage))
+								ws.conn.WriteMessage(websocket.TextMessage, jsonResultMessage)
+							}
+
+							cmd.Wait()
+							//jobResult := NewLorcJobDoneMessage(newJobMessage.Job.JobId)
+							//jsonResultMessage, _ := json.Marshal(jobResult)
+							//ws.conn.WriteMessage(websocket.TextMessage, jsonResultMessage)
+						}
+					}
+				}()
+			}
+		default:
+			fmt.Println("Unknown Job Type")
 		}
 	}
 }

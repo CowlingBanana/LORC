@@ -1,0 +1,15 @@
+<html>
+
+<h1>{{.Name}}</h1>
+<a href="/workflows">Back</a>
+{{if .Jobs}}
+    <ul>
+        {{ range $key, $value := .Jobs }}
+            <li><a href="/jobs/{{$key}}">{{$key}}</a></li>
+        {{end}}
+    </ul>
+{{else}}
+    No Jobs.
+{{end}}
+
+</html>

@@ -1,0 +1,49 @@
+<html lang="en" style="background-color: darkblue">
+<head>
+    <meta charset="UTF-8">
+    <title>Jobs</title>
+    <script>
+
+        const ticker = setInterval(update, 1000);
+
+        function update() {
+            const e = document.getElementById("data");
+            const xhr = new XMLHttpRequest();
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    if (e.value === xhr.responseText) {
+                        clearInterval(ticker);
+                    } else {
+                        e.value = xhr.responseText;
+                    }
+
+                }
+            };
+            xhr.open("GET", "/jobs/{{.JobId}}/update", true);
+            try {
+                xhr.send();
+            } catch (err) {
+                // handle error
+            }
+        }
+
+
+    </script>
+</head>
+<body style="color: white">
+<div>
+    <a href="/jobs">Back</a>
+    Job Info:
+    <br>
+    {{.JobId}}
+    <br>
+    {{.Command}}
+    <br>
+    <div>
+        <textarea id="data" style="width: 545px;height: 269px;">
+            {{.Result}}
+        </textarea>
+    </div>
+</div>
+</body>
+</html>
