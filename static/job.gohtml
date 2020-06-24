@@ -11,7 +11,7 @@
             const xhr = new XMLHttpRequest();
             xhr.onreadystatechange = function () {
                 if (xhr.readyState === 4 && xhr.status === 200) {
-                    if (e.value === xhr.responseText) {
+                    if (e.value === xhr.responseText && xhr.responseText.length > 0) {
                         clearInterval(ticker);
                     } else {
                         e.value = xhr.responseText;
@@ -19,7 +19,7 @@
 
                 }
             };
-            xhr.open("GET", "/jobs/{{.JobId}}/update", true);
+            xhr.open("GET", "/workflows/{{.WorkflowId}}/jobs/{{.JobId}}/update", true);
             try {
                 xhr.send();
             } catch (err) {
@@ -32,7 +32,7 @@
 </head>
 <body style="color: white">
 <div>
-    <a href="/jobs">Back</a>
+    <a href="/workflows/{{.WorkflowId}}">Back</a>
     Job Info:
     <br>
     {{.JobId}}

@@ -1,6 +1,6 @@
 package internal
 
 type Workflow struct {
-	Jobs []Job
+	Jobs map[string]Job
 	Name string
 }

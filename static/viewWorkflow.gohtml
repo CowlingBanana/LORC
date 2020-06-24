@@ -1,15 +1,26 @@
 <html>
-
+{{ printf "%#v" . }}
 <h1>{{.Name}}</h1>
 <a href="/workflows">Back</a>
 {{if .Jobs}}
     <ul>
+        {{ $baseLink := (printf "/workflows/%s/jobs/" .Name) }}
         {{ range $key, $value := .Jobs }}
-            <li><a href="/jobs/{{$key}}">{{$key}}</a></li>
+            <li><a href="{{$baseLink}}{{$key}}">{{$key}}</a></li>
         {{end}}
     </ul>
 {{else}}
-    No Jobs.
+    No jobs.
 {{end}}
+Enter your job to add to the workflow:<br>
+
+<form enctype="multipart/form-data" action="/workflows/{{.Name}}" method="post">
+    <input name="command" type="text">
+    <input name="file" type="file">
+    <input name="file" type="file">
+    <input type="submit">
+
+</form>
+<form action="/workflows/{{.Name}}/run" method="post"><input type="submit" value="Execute"></form>
 
 </html>

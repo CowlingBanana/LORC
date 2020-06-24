@@ -1,11 +1,14 @@
 package internal
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/gorilla/mux"
 	"html/template"
+	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path"
@@ -14,10 +17,8 @@ import (
 var templates *template.Template
 
 type TaskMaster struct {
-	clients     map[string]LorcClient
-	jobs        map[string]Job
-	jobsChannel chan Job
-	Workflows   map[string]Workflow
+	clients   map[string]LorcClient
+	workflows map[string]Workflow
 }
 
 func NewTaskMaster() *TaskMaster {
@@ -29,30 +30,117 @@ func NewTaskMaster() *TaskMaster {
 	}
 	master := &TaskMaster{
 		make(map[string]LorcClient),
-		make(map[string]Job),
-		make(chan Job),
 		make(map[string]Workflow),
 	}
+	return master
+}
+
+func (t *TaskMaster) isClientAvailable() (bool, LorcClient) {
+	for _, client := range t.clients {
+		if !client.executingTask {
+			return true, client
+		}
+	}
+	return false, LorcClient{}
+}
+
+func (t *TaskMaster) RunWorkflow(writer http.ResponseWriter, request *http.Request) {
+	vars := mux.Vars(request)
+	requestedWorkflow := t.workflows[vars["workflowName"]]
 	go func() {
-		for {
-			newJob := <-master.jobsChannel
-			for _, client := range master.clients {
-				if !client.executingTask {
-					client.sendJob(newJob)
+		for _, job := range requestedWorkflow.Jobs {
+			fmt.Printf("adding job to hopper: %v \n", job)
+			for {
+				if available, client := t.isClientAvailable(); available {
+					client.sendJob(job)
+					client.executingTask = true
+					t.clients[client.Id] = client
+					break
 				}
 			}
 		}
 	}()
-	return master
+	http.Redirect(writer, request, "/workflows/"+vars["workflowName"], http.StatusFound)
 }
 
 func (t *TaskMaster) ViewWorkflow(writer http.ResponseWriter, request *http.Request) {
+	vars := mux.Vars(request)
+	requestedWorkflow := t.workflows[vars["workflowName"]]
 	switch request.Method {
 	case http.MethodGet:
-		vars := mux.Vars(request)
-		requestedWorkflow := t.Workflows[vars["workflowName"]]
+		//view workflow
 		templates.ExecuteTemplate(writer, "viewWorkflow.gohtml", requestedWorkflow)
 	case http.MethodPost:
+		//add job to workflow
+		var inputFiles []InputFile
+		var commandString string
+		var mr *multipart.Reader
+		var err error
+		var part *multipart.Part
+		if mr, err = request.MultipartReader(); err != nil {
+			log.Printf("Hit error while opening multipart reader: %s", err.Error())
+			writer.WriteHeader(500)
+			fmt.Fprintf(writer, "Error occured during upload")
+			return
+		}
+		chunk := make([]byte, 4096)
+		var finalBytes []byte
+		// continue looping through all parts, *multipart.Reader.NextPart() will
+		// return an End of File when all parts have been read.
+		for {
+			var uploaded bool
+			if part, err = mr.NextPart(); err != nil {
+				if err != io.EOF {
+					log.Printf("Hit error while fetching next part: %s", err.Error())
+					writer.WriteHeader(500)
+					fmt.Fprintf(writer, "Error occured during upload")
+				} else {
+					log.Printf("Hit last part of multipart upload")
+					writer.WriteHeader(200)
+					jobId, err := NewUUID()
+					if err == nil {
+						job := *NewJobWithFiles(jobId, commandString, inputFiles, requestedWorkflow.Name)
+						t.workflows[vars["workflowName"]].Jobs[jobId] = job
+						fmt.Println(t.workflows)
+						templates.ExecuteTemplate(writer, "viewWorkflow.gohtml", t.workflows[vars["workflowName"]])
+
+					} else {
+						fmt.Println(err)
+						fmt.Fprintln(writer, "error")
+					}
+				}
+				return
+			}
+			// at this point the filename and the mimetype is known
+			log.Printf("Upload part: %v\n", part)
+
+			if part.FormName() == "command" {
+				if _, err = part.Read(chunk); err != nil {
+					if err != io.EOF {
+						log.Printf("Hit error while reading chunk: %s", err.Error())
+						writer.WriteHeader(500)
+						fmt.Fprintf(writer, "Error occured during upload")
+						return
+					}
+				}
+				commandString = string(bytes.Trim(chunk, "\x00"))
+			} else {
+				for !uploaded {
+					if _, err = part.Read(chunk); err != nil {
+						if err != io.EOF {
+							log.Printf("Hit error while reading chunk: %s", err.Error())
+							writer.WriteHeader(500)
+							fmt.Fprintf(writer, "Error occured during upload")
+							return
+						}
+						uploaded = true
+					}
+					finalBytes = append(finalBytes, bytes.Trim(chunk, "\x00")...)
+				}
+				inputFiles = append(inputFiles, *NewInputFile(part.FileName(), finalBytes))
+				finalBytes = nil
+			}
+		}
 	default:
 		fmt.Fprintln(writer, "Go Away.")
 	}
@@ -62,65 +150,40 @@ func (t *TaskMaster) ViewWorkflows(writer http.ResponseWriter, request *http.Req
 	if path.Base(request.URL.Path) == "new" {
 		switch request.Method {
 		case http.MethodGet:
-			templates.ExecuteTemplate(writer, "newworkflow.gohtml", t.Workflows)
+			//view workflow
+			templates.ExecuteTemplate(writer, "newworkflow.gohtml", t.workflows)
 		case http.MethodPost:
+			//add new workflow
 			workflowName := request.FormValue("name")
-			newWorkflow := &Workflow{[]Job{}, workflowName}
-			t.Workflows[workflowName] = *newWorkflow
+			newWorkflow := &Workflow{make(map[string]Job), workflowName}
+			t.workflows[workflowName] = *newWorkflow
 			http.Redirect(writer, request, "/workflows", 302)
 		default:
 			fmt.Fprintln(writer, "Go Away.")
 		}
 	} else {
-		templates.ExecuteTemplate(writer, "workflows.gohtml", t.Workflows)
+		templates.ExecuteTemplate(writer, "workflows.gohtml", t.workflows)
 	}
 }
 
 func (t *TaskMaster) JobViewer(writer http.ResponseWriter, request *http.Request) {
+	vars := mux.Vars(request)
 	if path.Base(request.URL.Path) == "update" {
-		vars := mux.Vars(request)
-		requestedJob := t.jobs[vars["jobId"]]
-		writer.Write([]byte(requestedJob.Result))
+		writer.Write([]byte(t.workflows[vars["workflowName"]].Jobs[vars["jobId"]].Result))
 	} else {
-		vars := mux.Vars(request)
-		requestedJob := t.jobs[vars["jobId"]]
-		templates.ExecuteTemplate(writer, "job.gohtml", requestedJob)
+		//view whole job
+		templates.ExecuteTemplate(writer, "job.gohtml", t.workflows[vars["workflowName"]].Jobs[vars["jobId"]])
 	}
 }
 
 func (t *TaskMaster) JobsHandler(writer http.ResponseWriter, request *http.Request) {
+	vars := mux.Vars(request)
+	requestedWorkflow := t.workflows[vars["workflowName"]]
 	switch request.Method {
 	case http.MethodGet:
+		//view all jobs
 		fmt.Println("Handling get")
-		templates.ExecuteTemplate(writer, "jobs.gohtml", t.jobs)
-	case http.MethodPost:
-		fmt.Println("Handling post")
-		var fileBytes []byte
-		var inputFiles []InputFile
-
-		commandString := request.FormValue("command")
-		fmt.Println(commandString)
-
-		request.ParseMultipartForm(32 << 20)
-		file, handler, err := request.FormFile("file")
-
-		if err == nil {
-			defer file.Close()
-			fileBytes = make([]byte, handler.Size)
-			file.Read(fileBytes)
-			inputFiles = append(inputFiles, *NewInputFile(handler.Filename, fileBytes))
-		}
-		jobId, err := NewUUID()
-		if err == nil {
-			job := *NewJobWithFiles(jobId, commandString, inputFiles)
-			go func() { t.jobsChannel <- job }()
-			t.jobs[jobId] = job
-			templates.ExecuteTemplate(writer, "jobs.gohtml", t.jobs)
-		} else {
-			fmt.Println(err)
-			fmt.Fprintln(writer, "error")
-		}
-
+		templates.ExecuteTemplate(writer, "jobs.gohtml", requestedWorkflow.Jobs)
 	default:
 		fmt.Fprintln(writer, "Go Away.")
 	}

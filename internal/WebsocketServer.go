@@ -78,10 +78,10 @@ func (c *LorcClient) parseMessage(jsonMessage []byte) {
 				log.Printf("Could not unmarshal LorcMessage, error: %s \n", err)
 				return
 			} else {
-				fmt.Printf("%s\n", string(jobResultMessage.Output))
-				job := c.master.jobs[jobResultMessage.JobId]
+				//fmt.Printf("%s\n", string(jobResultMessage.Output))
+				job := c.master.workflows[jobResultMessage.WorkflowId].Jobs[jobResultMessage.JobId]
 				job.UpdateResult(string(jobResultMessage.Output))
-				c.master.jobs[jobResultMessage.JobId] = job
+				c.master.workflows[jobResultMessage.WorkflowId].Jobs[jobResultMessage.JobId] = job
 			}
 		case JobDoneMessage:
 			var jobResultMessage LorcJobDoneMessage
@@ -89,6 +89,12 @@ func (c *LorcClient) parseMessage(jsonMessage []byte) {
 				log.Printf("Could not unmarshal LorcMessage, error: %s \n", err)
 				return
 			} else {
+				fmt.Println("Job done")
+				job := c.master.workflows[jobResultMessage.WorkflowId].Jobs[jobResultMessage.JobId]
+				job.Done = true
+				c.executingTask = false
+				c.master.clients[c.Id] = *c
+				c.master.workflows[jobResultMessage.WorkflowId].Jobs[jobResultMessage.JobId] = job
 				//delete(c.master.jobs,jobResultMessage.JobId)
 			}
 		default:
@@ -162,6 +168,7 @@ func (c *LorcClient) readPump() {
 }
 
 func (c *LorcClient) sendJob(job Job) {
+	fmt.Printf("Sending New Job: %v to client %s\n", job, c.Id)
 	newJobMessage := NewLorcNewJobMessage(job)
 	if newJobMessage != nil {
 		jsonMessage, _ := json.Marshal(newJobMessage)

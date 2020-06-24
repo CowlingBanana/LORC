@@ -1,10 +1,12 @@
 package internal
 
 type Job struct {
-	JobId   string
-	Command string
-	Files   []InputFile
-	Result  string
+	JobId      string
+	Command    string
+	Files      []InputFile
+	Result     string
+	WorkflowId string
+	Done       bool
 }
 
 type InputFile struct {
@@ -24,10 +26,6 @@ func NewInputFile(fileName string, fileContents []byte) *InputFile {
 	return &InputFile{FileName: fileName, FileContents: fileContents}
 }
 
-func NewJob(jobId string, commandString string) *Job {
-	return &Job{JobId: jobId, Command: commandString, Files: []InputFile{}}
-}
-
-func NewJobWithFiles(jobId string, commandString string, files []InputFile) *Job {
-	return &Job{JobId: jobId, Command: commandString, Files: files}
+func NewJobWithFiles(jobId string, commandString string, files []InputFile, workflowId string) *Job {
+	return &Job{JobId: jobId, Command: commandString, Files: files, WorkflowId: workflowId, Done: false}
 }

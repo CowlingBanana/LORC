@@ -25,26 +25,30 @@ type LorcNewJobMessage struct {
 
 type LorcJobResultMessage struct {
 	LorcMessage
-	JobId  string `json:"jobId"`
-	Output []byte `json:"output"`
+	JobId      string `json:"jobId"`
+	WorkflowId string `json:"workflowId"`
+	Output     []byte `json:"output"`
 }
 
 type LorcJobDoneMessage struct {
 	LorcMessage
-	JobId string `json:"jobId"`
+	JobId      string `json:"jobId"`
+	WorkflowId string `json:"workflowId"`
 }
 
-func NewLorcJobDoneMessage(jobId string) *LorcJobDoneMessage {
+func NewLorcJobDoneMessage(jobId string, workflowId string) *LorcJobDoneMessage {
 	return &LorcJobDoneMessage{
 		*NewLorcMessageWithType(JobDoneMessage),
 		jobId,
+		workflowId,
 	}
 }
 
-func NewLorcJobResultMessage(jobId string, output []byte) *LorcJobResultMessage {
+func NewLorcJobResultMessage(jobId string, workflowId string, output []byte) *LorcJobResultMessage {
 	return &LorcJobResultMessage{
 		*NewLorcMessageWithType(JobResultMessage),
 		jobId,
+		workflowId,
 		output,
 	}
 }

@@ -14,11 +14,13 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 )
 
 type WebSocketClient struct {
 	// The websocket connection.
 	conn *websocket.Conn
+	mu   sync.Mutex
 }
 
 func (ws *WebSocketClient) parseLorcServerMessage(jsonMessage []byte) {
@@ -43,7 +45,7 @@ func (ws *WebSocketClient) parseLorcServerMessage(jsonMessage []byte) {
 					}
 				}
 				jsonData, _ := json.Marshal(capabilitiesMessage)
-				ws.conn.WriteMessage(websocket.TextMessage, jsonData)
+				ws.send(websocket.TextMessage, jsonData)
 			}
 		case NewJobMessage:
 			var newJobMessage LorcNewJobMessage
@@ -51,7 +53,7 @@ func (ws *WebSocketClient) parseLorcServerMessage(jsonMessage []byte) {
 				log.Printf("Could not unmarshal LorcMessage, error: %s \n", err)
 				return
 			} else {
-				fmt.Println(newJobMessage.Job)
+				log.Printf("Job to run: %v\n", newJobMessage.Job)
 				go func() {
 					if strings.Contains(newJobMessage.Job.Command, "|") {
 						commandSlice := strings.Split(newJobMessage.Job.Command, "|")
@@ -88,17 +90,17 @@ func (ws *WebSocketClient) parseLorcServerMessage(jsonMessage []byte) {
 									if line == nil {
 										break
 									}
-									jobResult := NewLorcJobResultMessage(newJobMessage.Job.JobId, line)
+									jobResult := NewLorcJobResultMessage(newJobMessage.Job.JobId, newJobMessage.Job.WorkflowId, line)
 									jsonResultMessage, _ := json.Marshal(jobResult)
 									fmt.Println(string(line))
 									fmt.Println(string(jsonResultMessage))
-									ws.conn.WriteMessage(websocket.TextMessage, jsonResultMessage)
+									ws.send(websocket.TextMessage, jsonResultMessage)
 								}
 								commands[1].Wait()
 
-								jobResult := NewLorcJobDoneMessage(newJobMessage.Job.JobId)
+								jobResult := NewLorcJobDoneMessage(newJobMessage.Job.JobId, newJobMessage.Job.WorkflowId)
 								jsonResultMessage, _ := json.Marshal(jobResult)
-								ws.conn.WriteMessage(websocket.TextMessage, jsonResultMessage)
+								ws.send(websocket.TextMessage, jsonResultMessage)
 							}
 						}
 					} else {
@@ -113,6 +115,7 @@ func (ws *WebSocketClient) parseLorcServerMessage(jsonMessage []byte) {
 									fmt.Println(err)
 								}
 							}
+							log.Printf("Running command: %s with args %s\n", cmdArgs[0], cmdArgs[1:])
 							cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 							stdout, _ := cmd.StdoutPipe()
 							cmd.Start()
@@ -122,17 +125,19 @@ func (ws *WebSocketClient) parseLorcServerMessage(jsonMessage []byte) {
 								if line == nil {
 									break
 								}
-								jobResult := NewLorcJobResultMessage(newJobMessage.Job.JobId, line)
+								jobResult := NewLorcJobResultMessage(newJobMessage.Job.JobId, newJobMessage.Job.WorkflowId, line)
 								jsonResultMessage, _ := json.Marshal(jobResult)
 								fmt.Println(string(line))
 								fmt.Println(string(jsonResultMessage))
-								ws.conn.WriteMessage(websocket.TextMessage, jsonResultMessage)
+								ws.send(websocket.TextMessage, jsonResultMessage)
 							}
 
 							cmd.Wait()
-							//jobResult := NewLorcJobDoneMessage(newJobMessage.Job.JobId)
-							//jsonResultMessage, _ := json.Marshal(jobResult)
-							//ws.conn.WriteMessage(websocket.TextMessage, jsonResultMessage)
+							jobResult := NewLorcJobDoneMessage(newJobMessage.Job.JobId, newJobMessage.Job.WorkflowId)
+							jsonResultMessage, _ := json.Marshal(jobResult)
+							ws.send(websocket.TextMessage, jsonResultMessage)
+						} else {
+							fmt.Println("Command not found!")
 						}
 					}
 				}()
@@ -145,6 +150,12 @@ func (ws *WebSocketClient) parseLorcServerMessage(jsonMessage []byte) {
 
 func NewWebSocketClient() *WebSocketClient {
 	return &WebSocketClient{}
+}
+
+func (ws *WebSocketClient) send(messageType int, message []byte) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	ws.conn.WriteMessage(messageType, message)
 }
 
 func (ws *WebSocketClient) StartWebsocketClient() {
@@ -176,7 +187,7 @@ func (ws *WebSocketClient) StartWebsocketClient() {
 	helloMessage := NewLorcMessageWithType(HelloMessage)
 	jsonMessage, err := json.Marshal(helloMessage)
 
-	ws.conn.WriteMessage(websocket.TextMessage, jsonMessage)
+	ws.send(websocket.TextMessage, jsonMessage)
 
 	for {
 		select {
